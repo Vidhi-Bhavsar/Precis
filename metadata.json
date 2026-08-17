@@ -1,0 +1,6 @@
+{
+  "name": "Précis",
+  "description": "Document Analyzer that automatically extracts key summaries and provides an interactive Q&A assistant for documents up to 200 pages.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
