@@ -1,12 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import mammoth from 'mammoth';
 import { ParsedDocument } from '../types';
 
-// Configure local Vite-bundled PDF.js worker
+// Configure reliable PDF.js worker with CDN and local fallbacks
 if (typeof window !== 'undefined') {
   try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+    const version = pdfjsLib.version || '4.10.38';
+    // Use dependable CDN worker URL to prevent 404 on Vercel / Netlify / GitHub Pages
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.mjs`;
   } catch (e) {
     console.warn('Could not set pdfjs workerSrc:', e);
   }
