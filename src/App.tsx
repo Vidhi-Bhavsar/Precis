@@ -5,6 +5,7 @@ import { AnalyzingView } from './components/AnalyzingView';
 import { AnalysisResultView } from './components/AnalysisResultView';
 import { ParsedDocument, DocumentAnalysis, ChatMessage } from './types';
 import { parseUploadedFile } from './utils/documentParser';
+import { performClientSideAnalysis, performClientSideQA } from './utils/clientAnalyzer';
 
 export default function App() {
   const [currentDocument, setCurrentDocument] = useState<ParsedDocument | null>(null);
@@ -15,28 +16,36 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
-  // Trigger Gemini Analysis on backend
+  // Trigger Gemini Analysis on backend with graceful client-side fallback for static/GitHub Pages
   const triggerDocumentAnalysis = async (doc: ParsedDocument) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
     try {
-      const response = await fetch('/api/analyze-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: doc.text,
-          fileName: doc.name,
-          pageCount: doc.pageCount,
-          wordCount: doc.wordCount,
-        }),
-      });
+      let data: DocumentAnalysis | null = null;
+      try {
+        const response = await fetch('/api/analyze-document', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: doc.text,
+            fileName: doc.name,
+            pageCount: doc.pageCount,
+            wordCount: doc.wordCount,
+          }),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (fetchErr) {
+        // Backend not available (e.g. static GitHub Pages host)
+        console.warn('Backend unavailable, using client-side intelligence:', fetchErr);
       }
 
-      const data: DocumentAnalysis = await response.json();
+      if (!data) {
+        data = performClientSideAnalysis(doc.text, doc.name, doc.pageCount, doc.wordCount);
+      }
+
       setAnalysis(data);
       setChatMessages([]);
     } catch (err: any) {
@@ -87,40 +96,49 @@ export default function App() {
     setIsAsking(true);
 
     try {
-      const response = await fetch('/api/ask-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentText: currentDocument.text,
-          fileName: currentDocument.name,
-          question,
-          chatHistory: newHistory.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      });
+      let answer = '';
+      try {
+        const response = await fetch('/api/ask-document', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentText: currentDocument.text,
+            fileName: currentDocument.name,
+            question,
+            chatHistory: newHistory.map((m) => ({ role: m.role, content: m.content })),
+          }),
+        });
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to get answer');
+        if (response.ok) {
+          const data = await response.json();
+          answer = data.answer;
+        }
+      } catch (fetchErr) {
+        console.warn('Backend unavailable, using client-side answering:', fetchErr);
       }
 
-      const data = await response.json();
+      if (!answer) {
+        answer = performClientSideQA(currentDocument.text, question);
+      }
+
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.answer,
+        content: answer,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
       setChatMessages((prev) => [...prev, assistantMessage]);
     } catch (err: any) {
       console.error('Q&A Error:', err);
-      const errorMessage: ChatMessage = {
+      const fallbackAns = performClientSideQA(currentDocument.text, question);
+      const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Sorry, I encountered an issue retrieving the answer: ${err.message || 'Unknown error'}. Please try asking again.`,
+        content: fallbackAns,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setChatMessages((prev) => [...prev, errorMessage]);
+      setChatMessages((prev) => [...prev, assistantMessage]);
     } finally {
       setIsAsking(false);
     }
